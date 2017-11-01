@@ -1,0 +1,1 @@
+Textures taken from https://community.renderman.pixar.com/article/1787/library-pixar-one-thirty.html, used in accordance with the Creative Commons Attribution 4.0 International License. Modifications have been made to many of the included textures. For more textures and unmodified originals, please follow the link above.
