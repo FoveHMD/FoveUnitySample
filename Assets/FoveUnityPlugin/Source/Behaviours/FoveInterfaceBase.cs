@@ -17,7 +17,7 @@ namespace UnityEngine
 		{
 			public const int MAJOR = 2;
 			public const int MINOR = 1;
-			public const int RELEASE = 0;
+			public const int RELEASE = 1;
 		}
 
 		protected static bool ReportErrorCodeIfNotNone(EFVR_ErrorCode code, string funcName)
@@ -392,10 +392,8 @@ namespace UnityEngine
 					break;
 				}
 
-
 				_localDataIsCurrent = false;
 				_sHasUpdatedStaticData = false;
-				EnsureLocalDataConcurrency();
 			}
 
 			Debug.Log("Reconnecting...");
@@ -406,10 +404,9 @@ namespace UnityEngine
 		{
 			if (_sNeedsNewRenderPose)
 			{
-				//Debug.Log("Getting render pose...");
-
 				_sLastPose = _compositor.WaitForRenderPose();
-				CheckStaticConcurrency();
+				EnsureLocalDataConcurrency();
+
 				_sHasUpdatedStaticData = false;
 				_sNeedsNewRenderPose = false;
 			}
@@ -543,7 +540,7 @@ namespace UnityEngine
 		{
 			CalculateGazeRays(out _eyeRayLeft, out _eyeRayRight, false);
 		}
-		
+
 		/// <summary>
 		/// Ensure that the data we retrieve each frame has been updated in that frame. Sensor data changes
 		/// so rapidly that data could change mid-frame, which could cause things to become inconsistent.
@@ -579,13 +576,6 @@ namespace UnityEngine
 				// rotate head
 				if (orientation)
 				{
-					Quaternion quat = new Quaternion(_sHeadRotation.x, _sHeadRotation.y, _sHeadRotation.z,
-						_sHeadRotation.w);
-					_sHeadRotation.x = quat.x;
-					_sHeadRotation.y = quat.y;
-					_sHeadRotation.z = quat.z;
-					_sHeadRotation.w = quat.w;
-
 					gameObject.transform.localRotation = _sHeadRotation;
 				}
 			}

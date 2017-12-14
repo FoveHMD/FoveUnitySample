@@ -75,11 +75,7 @@ namespace UnityEngine
 		/// <returns>An equivalent FOVE SFVR_Vec3 object</returns>
 		public static SFVR_Vec3 GetFoveVector(Vector3 vec)
 		{
-			var result = new SFVR_Vec3();
-			result.x = vec.x;
-			result.y = vec.y;
-			result.z = vec.z;
-			return result;
+			return new SFVR_Vec3(vec.x, vec.y, vec.z);
 		}
 
 		/// <summary>
@@ -89,10 +85,7 @@ namespace UnityEngine
 		/// <returns>An equivalent FOVE SFVR_Vec2 object</returns>
 		public static SFVR_Vec2 GetFoveVector(Vector2 vec)
 		{
-			var result = new SFVR_Vec2();
-			result.x = vec.x;
-			result.y = vec.y;
-			return result;
+			return new SFVR_Vec2(vec.x, vec.y);
 		}
 
 		/// <summary>

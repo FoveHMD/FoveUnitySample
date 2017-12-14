@@ -37,8 +37,15 @@ namespace FoveSettings
 				new RequireWin64Bit_Suggestion(),
 				new RequireVR_Suggestion(),
 				new RequireSplitVrDevice_Suggestion(),
-				new RequireNoVr_Suggestion(),
-				new RequireVsyncOff_Suggestion()
+				new NoVr_Suggestion(),
+				new VsyncOff_Suggestion(),
+				new RunInBackground_Suggestion(),
+				new VisibleInBackground_Suggestion(),
+				new ForwardRendering_Suggestion(),
+				new Msaa4x_Suggestion(),
+				new SinglePassRendering_Suggestion(),
+				new HideResolutionDialog_Suggestion(),
+				new DisableResize_Suggestion()
 			});
 
 			// Unity won't deserialize assets properly until the normal update loop,
@@ -63,7 +70,7 @@ namespace FoveSettings
 			// Only run this once from the delegate
 			EditorApplication.update -= RunOnce;
 
-			m_Settings = Resources.Load<FoveSettings>("FOVE Settings");
+			m_Settings = GetSettings();
 			// In order to show settings:
 			// * showAutomatically must be true OR no settings file exists
 			// * at least one suggestion must be applicable
@@ -71,6 +78,19 @@ namespace FoveSettings
 			{
 				EditSettings();
 			}
+		}
+
+		private static FoveSettings GetSettings()
+		{
+			var result = Resources.Load<FoveSettings>("FOVE Settings");
+			if (!result)
+			{
+				Debug.Log("[FOVE] Creating FOVE settings file...");
+				result = CreateInstance<FoveSettings>();
+				AssetDatabase.CreateAsset(result, "Assets/FoveUnityPlugin/Resources/FOVE Settings.asset");
+			}
+			
+			return result;
 		}
 
 		[MenuItem("FOVE/Edit Settings")]
@@ -90,16 +110,13 @@ namespace FoveSettings
 		private string m_HelpMessage = DefaultHelpMessage;
 		private bool m_HelpMessageWasSet = false;
 		private double m_LastUpdateTime;
+		private bool m_forceCheck = true;
 
 		private void OnEnable()
 		{
-			m_Settings = Resources.Load<FoveSettings>("FOVE Settings");
-			if (!m_Settings)
-			{
-				Debug.Log("[FOVE] Creating FOVE settings file...");
-				m_Settings = CreateInstance<FoveSettings>();
-				AssetDatabase.CreateAsset(m_Settings, "Assets/FoveUnityPlugin/Resources/FOVE Settings.asset");
-			}
+			m_Settings = GetSettings();
+			m_forceCheck = true;
+			wantsMouseMove = true;
 		}
 
 		private bool MouseInLastElement()
@@ -132,18 +149,21 @@ namespace FoveSettings
 			return result;
 		}
 
-		private void Update()
-		{
-			double t = EditorApplication.timeSinceStartup;
-			if (t - m_LastUpdateTime > 0.1)
-			{
-				Repaint();
-				m_LastUpdateTime = t;
-			}
-		}
+		//private void Update()
+		//{
+		//	double t = EditorApplication.timeSinceStartup;
+		//	if (t - m_LastUpdateTime > 0.1)
+		//	{
+		//		Repaint();
+		//		m_LastUpdateTime = t;
+		//	}
+		//}
 
 		private void OnGUI()
 		{
+			if (Event.current.type == EventType.MouseMove)
+				Repaint();
+
 			if (m_WordWrapLabel == null)
 			{
 				m_WordWrapLabel = new GUIStyle(GUI.skin.label);
@@ -153,13 +173,12 @@ namespace FoveSettings
 			// We can only check for mouse position on repaint, so we shouldn't reset this except on repaint
 			if (Event.current.type == EventType.Repaint)
 				m_HelpMessageWasSet = false;
-
-			bool shouldForce = false;
+			
 			EditorGUILayout.BeginHorizontal();
 			{
 				m_Settings.interfaceChoice = (InterfaceChoice)EditorGUILayout.Popup("FOVE interface version", (int)m_Settings.interfaceChoice, InterfaceDescriptions, GUILayout.Width(350));
 				if (GUI.changed)
-					shouldForce = true;
+					m_forceCheck = true;
 				if (MouseInLastElement())
 					SetHelpMessage("Which FOVE interface do you use in your project? You should only use one of them, and this will help us inform what optimizations will work best for you.");
 
@@ -179,16 +198,21 @@ namespace FoveSettings
 					bool hasSuggestions = false;
 					m_FixListScrollPos = EditorGUILayout.BeginScrollView(m_FixListScrollPos, "box");
 					{
+						bool needsCheck = false;
 						foreach (var suggestion in m_FixList)
 						{
-							if (suggestion.IsOkay(m_Settings, shouldForce))
+							if (suggestion.IsOkay(m_Settings, m_forceCheck))
 								continue;
 
 							if (HandleSuggestion(suggestion))
+							{
 								suggestion.Fix(m_Settings);
+								needsCheck = true;
+							}
 
 							hasSuggestions = true;
 						}
+						m_forceCheck = needsCheck;
 
 						// Need something here to make sure the view 
 						if (!hasSuggestions)
@@ -206,11 +230,14 @@ namespace FoveSettings
 					EditorGUILayout.EndScrollView();
 
 					// "Fix All" button row
-					if (hasSuggestions)
+					EditorGUILayout.BeginHorizontal();
 					{
-						EditorGUILayout.BeginHorizontal();
+						if (GUILayout.Button("Refesh"))
+							m_forceCheck = true;
+						GUILayout.FlexibleSpace();
+
+						if (hasSuggestions)
 						{
-							GUILayout.FlexibleSpace();
 							if (GUILayout.Button("Fix All"))
 							{
 								foreach (var fix in m_FixList)
@@ -220,12 +247,13 @@ namespace FoveSettings
 
 									fix.Fix(m_Settings);
 								}
+								m_forceCheck = true;
 							}
 							if (MouseInLastElement())
 								SetHelpMessage("Implement all available optimizations for the selected FOVE interface version.");
-						}
-						EditorGUILayout.EndHorizontal();
-					} // hasSuggestions
+						} // hasSuggestions
+					}
+					EditorGUILayout.EndHorizontal();
 				}
 				EditorGUILayout.EndVertical();
 				

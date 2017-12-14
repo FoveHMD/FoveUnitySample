@@ -109,8 +109,7 @@ namespace UnityEngine
 				SetOptimalRenderScale();
 
 			WaitForRenderPose_IfNeeded();
-
-			// Transform junk
+			
 			SFVR_Matrix44 lViewMat = new SFVR_Matrix44();
 			SFVR_Matrix44 rViewMat = new SFVR_Matrix44();
 
@@ -173,12 +172,12 @@ namespace UnityEngine
 		\****************************************************************************************************/
 		protected override Vector3 GetLeftEyePosition()
 		{
-			return new Vector4(-usedIOD * 0.5f, eyeHeight, eyeForward) * worldScale;
+			return new Vector3(-usedIOD * 0.5f, eyeHeight, eyeForward) * worldScale + transform.position;
 		}
 
 		protected override Vector3 GetRightEyePosition()
 		{
-			return new Vector4(usedIOD * 0.5f, eyeHeight, eyeForward) * worldScale;
+			return new Vector3(usedIOD * 0.5f, eyeHeight, eyeForward) * worldScale + transform.position;
 		}
 
 		//
@@ -192,7 +191,7 @@ namespace UnityEngine
 		{
 			_eyeState = EyeState.PreRender;
 		}
-		
+
 		void OnRenderImage(RenderTexture source, RenderTexture destination)
 		{
 			Graphics.Blit(source, destination);
@@ -205,7 +204,7 @@ namespace UnityEngine
 				Debug.LogWarning("Source height (" + source.height + ") does not match desired height (" + _desiredRenderHeight + ")");
 				_needsResolutionUpdate = true;
 			}
-			
+
 			_layerSubmitInfo.pose = GetLastPose();
 
 			IntPtr texPtr = source.GetNativeTexturePtr();
@@ -222,7 +221,6 @@ namespace UnityEngine
 
 						result = _compositor.Submit(ref _layerSubmitInfo);
 						HandleSubmitResult(result);
-						
 						break;
 					case EyeState.DidLeft:
 						_layerSubmitInfo.left.texInfo.pTexture = IntPtr.Zero;
@@ -230,7 +228,6 @@ namespace UnityEngine
 
 						result = _compositor.Submit(ref _layerSubmitInfo);
 						HandleSubmitResult(result);
-
 						break;
 					case EyeState.DidRight:
 						Debug.Log("NOTE: Got more than 2 render notifications");
