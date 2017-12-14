@@ -112,7 +112,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1000010938986662}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: -2084783242, guid: 0cdcc9b028a249d48be7b6b80179278b, type: 3}
+  m_Script: {fileID: 11500000, guid: e3d58959627074d4a9a4e2b06f2c7731, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   interOcularDistance: 0.06
@@ -123,12 +123,11 @@ MonoBehaviour:
   useCustomPositionScaling: 0
   positionScales: {x: 1, y: 1, z: 1}
   suppressProjectionUpdates: 0
-  oversamplingRatio: 1.4
+  oversamplingRatio: 1
   gaze: 1
   orientation: 1
   position: 1
   skipAutoCalibrationCheck: 1
-  compositorClientType: 0
   disableTimewarp: 0
   disableFading: 0
   disableDistortion: 0
