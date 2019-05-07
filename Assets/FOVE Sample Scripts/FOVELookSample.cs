@@ -1,14 +1,16 @@
-﻿using UnityEngine;
+﻿using Fove.Unity;
+using UnityEngine;
 
-public class FOVELookSample : MonoBehaviour {
-	public Light attachedLight;
-	public FoveInterfaceBase foveInterface;
+public class FOVELookSample : FOVEBehavior
+{
+    public Light attachedLight;
 
 	private Collider my_collider;
 	private Material material;
 	private bool light_attached = false;
 	
-	void Start() {
+	void Start()
+    {
 		my_collider = GetComponent<Collider>();
 
 		if (attachedLight == null)
@@ -25,8 +27,9 @@ public class FOVELookSample : MonoBehaviour {
 			gameObject.SetActive(false);
 	}
 	
-	void Update () {
-		if (foveInterface.Gazecast(my_collider))
+	void Update ()
+    {
+		if (FoveInterface.Gazecast(my_collider))
 		{
 			material.EnableKeyword("_EMISSION");
 

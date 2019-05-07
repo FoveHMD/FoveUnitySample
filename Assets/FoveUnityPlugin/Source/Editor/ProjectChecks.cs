@@ -1,160 +1,32 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace FoveSettings
+namespace Fove.Unity
 {
 	public abstract class SuggestedProjectFix
 	{
 		public string Description;
 		public string HelpText;
-		public void Fix(FoveSettings settings)
+		public void Fix()
 		{
-			RealFix(settings);
+			RealFix();
 		}
 
 		private bool m_CachedCheck = false;
 		private bool m_hasChecked = false;
-		public bool IsOkay(FoveSettings settings, bool force = false) // return false if the suggestion applies
+		public bool IsOkay(bool force = false) // return false if the suggestion applies
 		{
 			if (force || !m_hasChecked)
 			{
-				m_CachedCheck = RealIsOkay(settings);
+				m_CachedCheck = RealIsOkay();
 				m_hasChecked = true;
 			}
 
 			return m_CachedCheck;
 		}
 
-		protected abstract bool RealIsOkay(FoveSettings settings);
-		protected abstract void RealFix(FoveSettings settings);
-	}
-
-	// Require that VR be enabled when using the experimental FoveInterface2 setting
-	public class RequireVR_Suggestion : SuggestedProjectFix
-	{
-		public RequireVR_Suggestion()
-		{
-			Description = "VR is not enabled";
-			HelpText = "The selected FOVE interface requires VR to be enabled in your project settings " +
-				"in order to function. This allows it to take advantage of Unity's internal VR optimisations." +
-				"\n\n" +
-				"Be aware that this setting is experimental. There may be some performance " +
-				"issues and you may see Unity-engine warnings or errors reported.";
-		}
-
-		protected override bool RealIsOkay(FoveSettings settings)
-		{
-			return PlayerSettings.virtualRealitySupported || settings.interfaceChoice != InterfaceChoice.VrRenderPath;
-		}
-
-		protected override void RealFix(FoveSettings settings)
-		{
-			PlayerSettings.virtualRealitySupported = true;
-
-			var splitDevice_Requirement = new RequireSplitVrDevice_Suggestion();
-			if (!splitDevice_Requirement.IsOkay(settings, true))
-			{
-				splitDevice_Requirement.Fix(settings);
-			}
-		}
-	}
-
-	// Require that the "split" stereo device exist when using the experimental FoveInterface2
-	public class RequireSplitVrDevice_Suggestion : SuggestedProjectFix
-	{
-		public RequireSplitVrDevice_Suggestion()
-		{
-			Description = "FOVE needs the \"split\" VR device";
-			HelpText = "FOVE uses the built-in \"Split Stereo Display (non head-mounted)\" VR device to take " +
-				"advantage of Unity's stereo-rendering optimzations, even though it claims to not be for " +
-				"head-mounted displays." +
-				"\n\n" +
-				"Your selected FOVE interface requires that this device be present in your VR device list.";
-		}
-
-		// Helper function to keep the call site cleaner now that we need the version #ifs
-		private string[] GetSupportedDevices()
-		{
-#if UNITY_2017_2_OR_NEWER
-			string[] devices = UnityEngine.XR.XRSettings.supportedDevices;
-#else
-			string[] devices = UnityEngine.VR.VRSettings.supportedDevices;
-#endif
-			return devices;
-		}
-
-		protected override bool RealIsOkay(FoveSettings settings)
-		{
-			string[] devices = GetSupportedDevices();
-			if (settings.interfaceChoice != InterfaceChoice.VrRenderPath)
-				return true;
-			if (PlayerSettings.virtualRealitySupported != true)
-				return true; // we cannot determine if this suggestion applies when VR is disabled
-
-			for (int i = 0; i < devices.Length; i++)
-			{
-				if (devices[i] == "split")
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
-
-		protected override void RealFix(FoveSettings settings)
-		{
-			string[] devices = GetSupportedDevices();
-			string[] new_devices;
-
-			bool skipCopy = false;
-			if (devices.Length == 1 && devices[0] == "None")
-			{
-				new_devices = new string[1];
-				skipCopy = true;
-			}
-			else
-			{
-				new_devices = new string[devices.Length + 1];
-			}
-
-			int i = 1;
-			new_devices[0] = "split";
-			if (!skipCopy)
-			{
-				foreach (var device in devices)
-				{
-					new_devices[i++] = device;
-				}
-			}
-
-#if UNITY_5_5_OR_NEWER
-				UnityEditorInternal.VR.VREditor.SetVREnabledDevicesOnTargetGroup(BuildTargetGroup.Standalone, new_devices);
-#else
-				UnityEditorInternal.VR.VREditor.SetVREnabledDevices(BuildTargetGroup.Standalone, new_devices);
-#endif
-		}
-	}
-
-	// Require that VR be disabled when using the stable FoveInterface
-	public class NoVr_Suggestion : SuggestedProjectFix
-	{
-		public NoVr_Suggestion()
-		{
-			Description = "VR should not be enabled";
-			HelpText = "The selected FOVE interface works best when VR is disabled, and having VR enabled could " +
-				"cause performance problems and graphical anomalies.";
-		}
-
-		protected override bool RealIsOkay(FoveSettings settings)
-		{
-			return !PlayerSettings.virtualRealitySupported || settings.interfaceChoice != InterfaceChoice.DualCameras;
-		}
-
-		protected override void RealFix(FoveSettings settings)
-		{
-			PlayerSettings.virtualRealitySupported = false;
-		}
+		protected abstract bool RealIsOkay();
+		protected abstract void RealFix();
 	}
 
 	// Require that Vsync be disabled
@@ -171,7 +43,7 @@ namespace FoveSettings
 				"your users.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			string[] qualityNames = QualitySettings.names;
 			for (int i = 0; i < qualityNames.Length; i++)
@@ -186,7 +58,7 @@ namespace FoveSettings
 			return true;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			string[] qualityNames = QualitySettings.names;
 			for (int i = 0; i < qualityNames.Length; i++)
@@ -207,12 +79,12 @@ namespace FoveSettings
 				"to load our libraries and won't run properly.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows64;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			bool success = false;
 #if UNITY_5_6_OR_NEWER
@@ -240,12 +112,12 @@ namespace FoveSettings
 				"regardless of which program has focus.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return PlayerSettings.runInBackground;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			PlayerSettings.runInBackground = true;
 		}
@@ -262,12 +134,12 @@ namespace FoveSettings
 				"notification popups, for instance.)";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return PlayerSettings.visibleInBackground;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			PlayerSettings.visibleInBackground = true;
 		}
@@ -283,7 +155,7 @@ namespace FoveSettings
 				"requiring post-process antialiasing.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 #if UNITY_5_5_OR_NEWER
 			//var low_graphics = UnityEditor.Rendering.EditorGraphicsSettings.GetTierSettings(BuildTargetGroup.Standalone, UnityEngine.Rendering.GraphicsTier.Tier1);
@@ -298,7 +170,7 @@ namespace FoveSettings
 #endif
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 #if UNITY_5_5_OR_NEWER
 			var high_graphics = UnityEditor.Rendering.EditorGraphicsSettings.GetTierSettings(
@@ -325,48 +197,14 @@ namespace FoveSettings
 				"quality versus performance.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return QualitySettings.antiAliasing >= 4;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			QualitySettings.antiAliasing = 4;
-		}
-	}
-
-	// Suggest that Unity use MSAA 4x
-	public class SinglePassRendering_Suggestion : SuggestedProjectFix
-	{
-		public SinglePassRendering_Suggestion()
-		{
-			Description = "Use single-pass rendering";
-			HelpText = "Single-pass rendering enables Unity to go over the scene graph only once, drawing " +
-				"objects to both eyes. This saves time on occlusion culling and shadow rendering, among other " +
-				"areas. If you are using non-default full-screen image effects, you should check with your " +
-				"plugin developer to make sure they work with single-pass rendering before enabling it.";
-		}
-
-		protected override bool RealIsOkay(FoveSettings settings)
-		{
-			if (settings.interfaceChoice == InterfaceChoice.DualCameras)
-				return true;
-
-#if UNITY_5_5_OR_NEWER
-			return PlayerSettings.stereoRenderingPath == StereoRenderingPath.SinglePass
-				|| PlayerSettings.stereoRenderingPath == StereoRenderingPath.Instancing
-#else
-			return true;
-#endif
-			;
-		}
-
-		protected override void RealFix(FoveSettings settings)
-		{
-#if UNITY_5_5_OR_NEWER
-			PlayerSettings.stereoRenderingPath = StereoRenderingPath.SinglePass;
-#endif
 		}
 	}
 
@@ -381,12 +219,12 @@ namespace FoveSettings
 				"up when launched (which is useful for Steam integration, for instance).";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return PlayerSettings.displayResolutionDialog == ResolutionDialogSetting.Disabled;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			PlayerSettings.displayResolutionDialog = ResolutionDialogSetting.Disabled;
 		}
@@ -403,12 +241,12 @@ namespace FoveSettings
 				"accurately represents what your user is seeing in VR.";
 		}
 
-		protected override bool RealIsOkay(FoveSettings settings)
+		protected override bool RealIsOkay()
 		{
 			return PlayerSettings.resizableWindow == false;
 		}
 
-		protected override void RealFix(FoveSettings settings)
+		protected override void RealFix()
 		{
 			PlayerSettings.resizableWindow = false;
 		}

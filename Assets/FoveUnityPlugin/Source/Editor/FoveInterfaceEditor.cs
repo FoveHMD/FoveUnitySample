@@ -1,118 +1,142 @@
+﻿using UnityEditor;
 using UnityEngine;
-using UnityEditor;
+using Fove.Unity;
 
-[CustomEditor(typeof(FoveInterface))]
-[InitializeOnLoad]
-public class FoveInterfaceEditor : FoveInterfaceBaseEditor
+[CustomEditor(typeof(FoveInterface), true)]
+public class FoveInterfaceEditor : Editor
 {
-	// Intermediate camera setups
-	SerializedProperty _usesCameraPrefab;
-	SerializedProperty _cameraPrototype;
+	// Fove SDK Enable/Disable components\
+	SerializedProperty _gaze;
+	SerializedProperty _orientation;
+	SerializedProperty _position;
 
-	// Advanced camera setups
-	SerializedProperty _usesCameraOverride;
-	SerializedProperty _leftCameraOverride;
-	SerializedProperty _rightCameraOverride;
-	
-	SerializedProperty _usesAAOverride;
-	SerializedProperty _aaSamples;
-	private string[] _aaOptions = { "1x", "2x", "4x", "8x" };
-	private int[] _aaOptionValues = { 1, 2, 4, 8 };
+	SerializedProperty _eyeTargets;
+	SerializedProperty _poseType;
+
+	SerializedProperty _cullMaskLeft;
+	SerializedProperty _cullMaskRight;
 
 	// Compositor properties
-	SerializedProperty _compositorRenderingEnabled;
+	//SerializedProperty _compositorLayerType;
+	SerializedProperty _compositorDisableTimewarp;
+	SerializedProperty _compositorDisableDistortion;
 
-	private bool showOverrides;
+	private static bool _showCullingMasks;
+	private static bool _showCompositorAttribs;
 
-	protected override void EnableProperties()
+	protected GUIStyle helpStyle;
+
+	protected void CheckForNull(System.Object obj, string name)
 	{
-		base.EnableProperties();
-
-		_usesCameraPrefab = serializedObject.FindProperty("useCameraPrefab");
-		CheckForNull(_usesCameraPrefab, "_usesCameraPrefab");
-		_usesCameraOverride = serializedObject.FindProperty("useCameraOverride");
-		CheckForNull(_usesCameraOverride, "_usesCameraOverride");
-
-		_cameraPrototype = serializedObject.FindProperty("eyeCameraPrototype");
-		CheckForNull(_cameraPrototype, "_cameraPrototype");
-		_leftCameraOverride = serializedObject.FindProperty("leftEyeOverride");
-		CheckForNull(_leftCameraOverride, "_leftCameraOverride");
-		_rightCameraOverride = serializedObject.FindProperty("rightEyeOverride");
-		CheckForNull(_rightCameraOverride, "_rightCameraOverride");
-
-		_aaSamples = serializedObject.FindProperty("antialiasSampleCount");
-		CheckForNull(_aaSamples, "_aaSamples");
-		_usesAAOverride = serializedObject.FindProperty("overrideAntialiasing");
-		CheckForNull(_usesAAOverride, "_usesAAOverride");
-
-		// Compositor props
-		_compositorRenderingEnabled = serializedObject.FindProperty("enableRendering");
-		CheckForNull(_compositorRenderingEnabled, "_compositorRenderingEnabled");
+		if (obj == null)
+			Debug.LogWarning(name + " was null");
 	}
 
-	protected override void DrawLocalGUIEditor()
+	protected void OnEnable()
 	{
+		EnableProperties();
+	}
+
+	protected virtual void EnableProperties()
+	{
+		_gaze = serializedObject.FindProperty("gaze");
+		CheckForNull(_gaze, "_gaze");
+		_orientation = serializedObject.FindProperty("orientation");
+		CheckForNull(_orientation, "_orientation");
+		_position = serializedObject.FindProperty("position");
+		CheckForNull(_position, "_position");
+		
+		_eyeTargets = serializedObject.FindProperty("eyeTargets");
+		CheckForNull(_eyeTargets, "_eyeTargets");
+		_poseType = serializedObject.FindProperty("poseType");
+		CheckForNull(_poseType, "_poseType");
+
+		_cullMaskLeft = serializedObject.FindProperty("cullMaskLeft");
+		CheckForNull(_cullMaskLeft, "_cullMaskLeft");
+		_cullMaskRight = serializedObject.FindProperty("cullMaskRight");
+		CheckForNull(_cullMaskRight, "_cullMaskRight");
+		
+		//_compositorLayerType = serializedObject.FindProperty("layerType");
+		//CheckForNull(_compositorLayerType, "_compositorLayerType");
+		_compositorDisableTimewarp = serializedObject.FindProperty("disableTimewarp");
+		CheckForNull(_compositorDisableTimewarp, "_compositorDisableTimewarp");
+		_compositorDisableDistortion = serializedObject.FindProperty("disableDistortion");
+		CheckForNull(_compositorDisableDistortion, "_compositorDisableDistortion");
+	}
+
+	// Currently does not support editing of multiple objects at once.
+	// I do not anticipate any problems with this since you should only
+	// ever really have one per scene anyway.
+	public sealed override void OnInspectorGUI()
+	{
+		// A decent style.  Light grey text inside a border.
+		helpStyle = new GUIStyle(GUI.skin.box);
+		helpStyle.wordWrap = true;
+		helpStyle.alignment = TextAnchor.UpperLeft;
+		
+		helpStyle.normal.textColor = Color.red;
+
+		// Update the serializedobject
+		serializedObject.Update();
+
+		// Cache the editor's playing state so we can prevent editing fields that shouldn't update during
+		// a live play session.
 		bool isPlaying = EditorApplication.isPlaying;
 
 		EditorGUILayout.Space();
-		EditorGUILayout.LabelField("Legacy Settings", EditorStyles.boldLabel);
-		EditorGUI.indentLevel++;
-
-		// Prevent editing fields that don't update while actually playing in the editor
-		GUI.enabled = !isPlaying;
-
-		EditorGUILayout.PropertyField(_usesCameraPrefab);
-		GUI.enabled = _usesCameraPrefab.boolValue & !isPlaying;
-		EditorGUILayout.PropertyField(_cameraPrototype);
-		GUI.enabled = true & !isPlaying;
-
-		EditorGUILayout.Space();
-
-		GUI.enabled = true;
-		showOverrides = EditorGUILayout.Foldout(showOverrides, "Legacy Overrides");
-		if (showOverrides)
+		EditorGUILayout.LabelField("Client uses...", EditorStyles.boldLabel);
+		EditorGUI.BeginChangeCheck();
 		{
 			EditorGUI.indentLevel++;
-
-			EditorGUILayout.PropertyField(_compositorRenderingEnabled);
-
-			EditorGUILayout.PropertyField(_usesAAOverride);
-			GUI.enabled = _usesAAOverride.boolValue & !isPlaying; // not modifiable in play mode
-			{
-				EditorGUI.indentLevel++;
-				_aaSamples.intValue = EditorGUILayout.IntPopup(_aaSamples.intValue, _aaOptions, _aaOptionValues);
-				int samples = _aaSamples.intValue;
-				if (samples > 8)
-					samples = 8;
-				else if (samples > 4)
-					samples = 4;
-				else if (samples < 1)
-					samples = 1;
-				EditorGUI.indentLevel--;
-			}
-
-			GUI.enabled = !isPlaying;
-			EditorGUILayout.PropertyField(_usesCameraOverride);
-			GUI.enabled = _usesCameraOverride.boolValue & !isPlaying;  // not modifiable in play mode
-			{
-				EditorGUI.indentLevel++;
-				EditorGUILayout.PropertyField(_leftCameraOverride);
-				EditorGUILayout.PropertyField(_rightCameraOverride);
-				EditorGUI.indentLevel--;
-			}
-			
-			if (_usesCameraOverride.boolValue && _usesCameraPrefab.boolValue)
-			{
-				// Don't use EditorGUILayout.Label()
-				GUILayout.Label(
-					"WARNING: Having camera prefab and camera override enabled is an error; camera prefab will be used and override will be ignored."
-					, helpStyle
-					, GUILayout.ExpandWidth(true));
-			}
-			
+			EditorGUILayout.PropertyField(_gaze);
+			EditorGUILayout.PropertyField(_orientation);
+			EditorGUILayout.PropertyField(_position);
 			EditorGUI.indentLevel--;
 		}
 
-		EditorGUI.indentLevel--;
+		EditorGUILayout.Space();
+		EditorGUILayout.PropertyField(_eyeTargets);
+		EditorGUILayout.PropertyField(_poseType);
+
+		GUI.enabled = true;
+		_showCullingMasks = EditorGUILayout.Foldout(_showCullingMasks, "Per-Eye Culling Masks");
+		if (_showCullingMasks)
+		{
+			EditorGUI.indentLevel++;
+			EditorGUILayout.PropertyField(_cullMaskLeft);
+			EditorGUILayout.PropertyField(_cullMaskRight);
+			EditorGUI.indentLevel--;
+		}
+		
+		GUI.enabled = true;
+		_showCompositorAttribs = EditorGUILayout.Foldout(_showCompositorAttribs, "Compositor options");
+		if (_showCompositorAttribs)
+		{
+			GUI.enabled = !isPlaying;
+			EditorGUI.indentLevel++;
+
+			//EditorGUILayout.PropertyField(_compositorLayerType);
+			EditorGUILayout.PropertyField(_compositorDisableTimewarp);
+			EditorGUILayout.PropertyField(_compositorDisableDistortion);
+
+			EditorGUI.indentLevel--;
+		}
+
+		GUI.enabled = true;
+		if (isPlaying && GUILayout.Button("Ensure calibration"))
+		{
+			Debug.Log("Manually triggering eye tracking calibration check from inspector...");
+			FoveManager.EnsureEyeTrackingCalibration();
+		}
+
+		if (Application.targetFrameRate != -1)
+		{
+			GUILayout.Label(
+				"WARNING: Your target framerate is set to " + Application.targetFrameRate + ". Having a target framerate can artificially slow down FOVE frame submission. We recommend disabling this."
+				, helpStyle
+				, GUILayout.ExpandWidth(true));
+		}
+
+		serializedObject.ApplyModifiedProperties();
 	}
 }

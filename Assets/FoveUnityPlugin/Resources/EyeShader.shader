@@ -38,17 +38,14 @@
 				
 				fixed4 frag (v2f i) : SV_Target
 				{
-					float mask = 0;
-					mask = i.texcoord.x;
-					mask = saturate(saturate(max(mask, 0.5) - 0.5) * 10000);
+					float mask = round(i.texcoord.x);
 
 					i.texcoord.x *= 2;
-					//i.texcoord.y = 1 - i.texcoord.y;
-
-					fixed4 col = (1 - mask) * tex2D(_Tex2, i.texcoord);
+					float4 colorLeft = tex2D(_Tex2, i.texcoord);
 					i.texcoord.x -= 1;
-					col += (mask) * tex2D(_Tex1, i.texcoord);
-					return col;
+					float4 colorRight = tex2D(_Tex1, i.texcoord);
+
+					return lerp(colorLeft, colorRight, mask);
 				}
 			ENDCG
 			Cull Off

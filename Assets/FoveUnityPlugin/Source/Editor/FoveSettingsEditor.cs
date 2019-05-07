@@ -1,13 +1,13 @@
 using UnityEngine;
 using UnityEditor;
-using UnityEditor.AnimatedValues;
 using System.Collections.Generic;
+using System;
 
-namespace FoveSettings
+namespace Fove.Unity
 {
 	[CustomEditor(typeof(FoveSettings))]
 	public class FoveSettingsEditor : Editor
-	{		
+	{
 		public override void OnInspectorGUI()
 		{
 			EditorGUILayout.LabelField("Please edit this object type using the FOVE Settings window.");
@@ -21,29 +21,21 @@ namespace FoveSettings
 	[InitializeOnLoad]
 	public class FoveSettingsWindow : EditorWindow
 	{
-		private static FoveSettings m_Settings;
+		private static readonly string[] Tabs = { "Fixes", "Settings" };
+		
 		private static GUIStyle m_WordWrapLabel;
-
-		private static readonly string[] InterfaceDescriptions =
-		{
-			"Dual Camera (FoveInterface)",
-			"Experimental (FoveInterface2)",
-		};
+		
 		private static List<SuggestedProjectFix> m_FixList;
 
 		static FoveSettingsWindow()
 		{
 			m_FixList = new List<SuggestedProjectFix>(new SuggestedProjectFix[] {
 				new RequireWin64Bit_Suggestion(),
-				new RequireVR_Suggestion(),
-				new RequireSplitVrDevice_Suggestion(),
-				new NoVr_Suggestion(),
 				new VsyncOff_Suggestion(),
 				new RunInBackground_Suggestion(),
 				new VisibleInBackground_Suggestion(),
 				new ForwardRendering_Suggestion(),
 				new Msaa4x_Suggestion(),
-				new SinglePassRendering_Suggestion(),
 				new HideResolutionDialog_Suggestion(),
 				new DisableResize_Suggestion()
 			});
@@ -56,7 +48,7 @@ namespace FoveSettings
 		static bool NeedsAnySuggestions()
 		{
 			foreach (var suggestion in m_FixList) {
-				if (!suggestion.IsOkay(m_Settings))
+				if (!suggestion.IsOkay())
 				{
 					return true;
 				}
@@ -70,27 +62,28 @@ namespace FoveSettings
 			// Only run this once from the delegate
 			EditorApplication.update -= RunOnce;
 
-			m_Settings = GetSettings();
+			EnsureSettingsExists();
 			// In order to show settings:
 			// * showAutomatically must be true OR no settings file exists
 			// * at least one suggestion must be applicable
-			if ((m_Settings == null || m_Settings.showAutomatically) && NeedsAnySuggestions())
+			if ((FoveSettings.ShouldShowAutomatically) && NeedsAnySuggestions())
 			{
 				EditSettings();
 			}
 		}
 
-		private static FoveSettings GetSettings()
+		private static void EnsureSettingsExists()
 		{
-			var result = Resources.Load<FoveSettings>("FOVE Settings");
-			if (!result)
+			if (Resources.Load<FoveSettings>("FOVE Settings") == null)
 			{
-				Debug.Log("[FOVE] Creating FOVE settings file...");
-				result = CreateInstance<FoveSettings>();
-				AssetDatabase.CreateAsset(result, "Assets/FoveUnityPlugin/Resources/FOVE Settings.asset");
+				if (!System.IO.Directory.Exists("Assets/FoveUnityPlugin/Resources"))
+				{
+					AssetDatabase.CreateFolder("Assets/FoveUnityPlugin", "Resources");
+				}
+
+				var temp = CreateInstance<FoveSettings>();
+				AssetDatabase.CreateAsset(temp, "Assets/FoveUnityPlugin/Resources/FOVE Settings.asset");
 			}
-			
-			return result;
 		}
 
 		[MenuItem("FOVE/Edit Settings")]
@@ -105,16 +98,16 @@ namespace FoveSettings
 		}
 
 		// NON-STATIC STUFF
-		private Vector2 m_FixListScrollPos = new Vector2();
+		private Vector2 m_ListScrollPos = new Vector2();
 		private static readonly string DefaultHelpMessage = "Mouse-over suggestions for more detail.";
 		private string m_HelpMessage = DefaultHelpMessage;
 		private bool m_HelpMessageWasSet = false;
-		private double m_LastUpdateTime;
 		private bool m_forceCheck = true;
+		private int m_selectedTab = 0;
 
 		private void OnEnable()
 		{
-			m_Settings = GetSettings();
+			EnsureSettingsExists();
 			m_forceCheck = true;
 			wantsMouseMove = true;
 		}
@@ -159,6 +152,98 @@ namespace FoveSettings
 		//	}
 		//}
 
+		private void DrawFixSuggestions()
+		{
+			bool hasSuggestions = false;
+			bool needsCheck = false;
+			foreach (var suggestion in m_FixList)
+			{
+				if (suggestion.IsOkay(m_forceCheck))
+					continue;
+
+				if (HandleSuggestion(suggestion))
+				{
+					suggestion.Fix();
+					needsCheck = true;
+				}
+
+				hasSuggestions = true;
+			}
+			m_forceCheck = needsCheck;
+
+			// Need something here to make sure the view 
+			if (!hasSuggestions)
+			{
+				GUILayout.FlexibleSpace();
+				GUILayout.BeginHorizontal();
+				GUILayout.FlexibleSpace();
+				GUILayout.Label("No fixes/suggestions.");
+				GUILayout.FlexibleSpace();
+				GUILayout.EndHorizontal();
+			}
+
+			GUILayout.FlexibleSpace();
+
+			// "Fix All" button row
+			EditorGUILayout.BeginHorizontal();
+			{
+				if (GUILayout.Button("Refesh"))
+					m_forceCheck = true;
+				GUILayout.FlexibleSpace();
+
+				if (hasSuggestions)
+				{
+					if (GUILayout.Button("Fix All"))
+					{
+						foreach (var fix in m_FixList)
+						{
+							if (fix.IsOkay(true))
+								continue;
+
+							fix.Fix();
+						}
+						m_forceCheck = true;
+					}
+					if (MouseInLastElement())
+						SetHelpMessage("Implement all available optimizations for the selected FOVE interface version.");
+				} // hasSuggestions
+			}
+			EditorGUILayout.EndHorizontal();
+		}
+
+		private void DrawElementRow(string propName, string helpText, Action call)
+		{
+			EditorGUILayout.BeginHorizontal();
+			{
+				call();
+				GUILayout.FlexibleSpace();
+			}
+			EditorGUILayout.EndHorizontal();
+			if (MouseInLastElement())
+				SetHelpMessage(helpText);
+		}
+
+		private void DrawSettings(SerializedObject serialized)
+		{
+			EditorGUILayout.LabelField("Project Settings", EditorStyles.miniBoldLabel);
+			EditorGUI.indentLevel++;
+			
+			DrawElementRow(
+				"forceCalibration",
+				"Force eye tracking to recalibrate every time the game is launched (including pressing the \"Play\" button in the editor.\n\nRecommended: Leave this off except for builds where users will be changing frequently, e.g., public demos/exhibitions.",
+				() => { serialized.FindProperty("forceCalibration").boolValue = EditorGUILayout.Toggle("Force Calibration", FoveSettings.ShouldForceCalibration, GUILayout.ExpandWidth(false)); });
+			DrawElementRow(
+				"worldScale",
+				"The multiplier for how many engine-world units are in one meter. Unity assumes 1 unit = 1 meter, so you will likely want to keep this the same. If you treat 10 units as a meter, you would set this to 10. If each world unit is 10 meters, you would set this to 0.1, and so forth.",
+				() => { serialized.FindProperty("worldScale").floatValue = EditorGUILayout.FloatField("World Scale", FoveSettings.WorldScale, GUILayout.ExpandWidth(false)); });
+			DrawElementRow(
+				"renderScale",
+				"A multiplier for the rendertexture width and height to increase or decrease the resolution. This is useful to increase oversampling on scenes which can afford it; or to reduce or even undersample for scenes which are more complex. This value can be adjusted real-time by changing FoveManager.RenderScale as well.",
+				() => { serialized.FindProperty("renderScale").floatValue = EditorGUILayout.Slider("Render Scale", FoveSettings.RenderScale, 0.01f, 2.0f, GUILayout.ExpandWidth(false)); });
+
+			EditorGUI.indentLevel--;
+		}
+
 		private void OnGUI()
 		{
 			if (Event.current.type == EventType.MouseMove)
@@ -173,18 +258,20 @@ namespace FoveSettings
 			// We can only check for mouse position on repaint, so we shouldn't reset this except on repaint
 			if (Event.current.type == EventType.Repaint)
 				m_HelpMessageWasSet = false;
+
+			var serialized = FoveSettings.GetSerializedObject();
 			
 			EditorGUILayout.BeginHorizontal();
 			{
-				m_Settings.interfaceChoice = (InterfaceChoice)EditorGUILayout.Popup("FOVE interface version", (int)m_Settings.interfaceChoice, InterfaceDescriptions, GUILayout.Width(350));
-				if (GUI.changed)
-					m_forceCheck = true;
+				GUILayout.FlexibleSpace();
+
+				m_selectedTab = GUILayout.Toolbar(m_selectedTab, Tabs);
 				if (MouseInLastElement())
-					SetHelpMessage("Which FOVE interface do you use in your project? You should only use one of them, and this will help us inform what optimizations will work best for you.");
+					SetHelpMessage("Select whether you want to view project settings suggestions (with options to automatically apply them) or project-level settings for the FOVE headset.");
 
 				GUILayout.FlexibleSpace();
-				
-				m_Settings.showHelp = GUILayout.Toggle(m_Settings.showHelp, "Show Help", GUILayout.ExpandWidth(false));
+
+				serialized.FindProperty("showHelp").boolValue = GUILayout.Toggle(FoveSettings.ShouldShowHelp, "Show Help", GUILayout.ExpandWidth(false));
 				EditorGUILayout.Space();
 			}
 			EditorGUILayout.EndHorizontal();
@@ -195,69 +282,26 @@ namespace FoveSettings
 				// Contains fixes scroll view and "Fix All" button
 				EditorGUILayout.BeginVertical();
 				{
-					bool hasSuggestions = false;
-					m_FixListScrollPos = EditorGUILayout.BeginScrollView(m_FixListScrollPos, "box");
+					m_ListScrollPos = EditorGUILayout.BeginScrollView(m_ListScrollPos, "box");
 					{
-						bool needsCheck = false;
-						foreach (var suggestion in m_FixList)
+						switch (m_selectedTab)
 						{
-							if (suggestion.IsOkay(m_Settings, m_forceCheck))
-								continue;
-
-							if (HandleSuggestion(suggestion))
-							{
-								suggestion.Fix(m_Settings);
-								needsCheck = true;
-							}
-
-							hasSuggestions = true;
+							case 0:
+								DrawFixSuggestions();
+								break;
+							case 1:
+								DrawSettings(serialized);
+								break;
+							default:
+								EditorGUILayout.LabelField("Invalid tab selected somehow...");
+								break;
 						}
-						m_forceCheck = needsCheck;
-
-						// Need something here to make sure the view 
-						if (!hasSuggestions)
-						{
-							GUILayout.FlexibleSpace();
-							GUILayout.BeginHorizontal();
-							GUILayout.FlexibleSpace();
-							GUILayout.Label("No fixes/suggestions.");
-							GUILayout.FlexibleSpace();
-							GUILayout.EndHorizontal();
-						}
-						
-						GUILayout.FlexibleSpace();
 					}
 					EditorGUILayout.EndScrollView();
-
-					// "Fix All" button row
-					EditorGUILayout.BeginHorizontal();
-					{
-						if (GUILayout.Button("Refesh"))
-							m_forceCheck = true;
-						GUILayout.FlexibleSpace();
-
-						if (hasSuggestions)
-						{
-							if (GUILayout.Button("Fix All"))
-							{
-								foreach (var fix in m_FixList)
-								{
-									if (fix.IsOkay(m_Settings, true))
-										continue;
-
-									fix.Fix(m_Settings);
-								}
-								m_forceCheck = true;
-							}
-							if (MouseInLastElement())
-								SetHelpMessage("Implement all available optimizations for the selected FOVE interface version.");
-						} // hasSuggestions
-					}
-					EditorGUILayout.EndHorizontal();
 				}
 				EditorGUILayout.EndVertical();
 				
-				if (m_Settings.showHelp)
+				if (FoveSettings.ShouldShowHelp)
 				{
 					EditorGUILayout.LabelField(m_HelpMessage, m_WordWrapLabel, GUILayout.MaxWidth(position.width * 0.33f), GUILayout.ExpandHeight(true));
 				}
@@ -273,13 +317,15 @@ namespace FoveSettings
 			if (MouseInLastElement())
 				SetHelpMessage("Close the FOVE settings window.");
 
-			m_Settings.showAutomatically = GUILayout.Toggle(m_Settings.showAutomatically, "Always Show Suggestions", GUILayout.ExpandWidth(false));
+			serialized.FindProperty("showAutomatically").boolValue = GUILayout.Toggle(FoveSettings.ShouldShowAutomatically, "Always Show Suggestions", GUILayout.ExpandWidth(false));
 			if (MouseInLastElement())
 				SetHelpMessage("Whether or not to check for available optimizations every time the plugin is reloaded (typically just on the initial project load).");
 			EditorGUILayout.EndHorizontal();
 
 			if (!m_HelpMessageWasSet)
 				ResetHelpMessage();
+
+			serialized.ApplyModifiedProperties();
 		}
 	}
 }
