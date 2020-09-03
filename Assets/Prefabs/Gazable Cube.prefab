@@ -20,9 +20,8 @@ GameObject:
   m_Component:
   - 4: {fileID: 4000011646296104}
   - 33: {fileID: 33000013047162080}
-  - 65: {fileID: 65000013828917348}
   - 23: {fileID: 23000012588381988}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Centre Block
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -37,7 +36,7 @@ GameObject:
   serializedVersion: 4
   m_Component:
   - 4: {fileID: 4000012674225920}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Gazable Cube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -56,7 +55,7 @@ GameObject:
   - 65: {fileID: 65000012935221236}
   - 23: {fileID: 23000011829030324}
   - 114: {fileID: 114000012383411770}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Gazable Cube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -72,7 +71,7 @@ GameObject:
   m_Component:
   - 4: {fileID: 4000011034181544}
   - 108: {fileID: 108000012119899942}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Cube Light
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -100,7 +99,7 @@ Transform:
   m_GameObject: {fileID: 1000013811596198}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: -0.125}
-  m_LocalScale: {x: 0.5, y: 0.5, z: 0.25}
+  m_LocalScale: {x: 0.7, y: 0.7, z: 0.25}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_Children:
   - {fileID: 4000011034181544}
@@ -126,7 +125,7 @@ Transform:
   m_PrefabInternal: {fileID: 100100000}
   m_GameObject: {fileID: 1000013267847318}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 2, z: 5}
+  m_LocalPosition: {x: 0.732, y: 1.908, z: 5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_Children:
@@ -218,18 +217,6 @@ BoxCollider:
   serializedVersion: 2
   m_Size: {x: 1.2, y: 1.2, z: 1.2}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!65 &65000013828917348
-BoxCollider:
-  m_ObjectHideFlags: 1
-  m_PrefabParentObject: {fileID: 0}
-  m_PrefabInternal: {fileID: 100100000}
-  m_GameObject: {fileID: 1000012809244354}
-  m_Material: {fileID: 0}
-  m_IsTrigger: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Size: {x: 1, y: 1, z: 1}
-  m_Center: {x: 0, y: 0, z: 0}
 --- !u!108 &108000012119899942
 Light:
   m_ObjectHideFlags: 1
@@ -239,7 +226,7 @@ Light:
   m_Enabled: 0
   serializedVersion: 7
   m_Type: 2
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 0, b: 0, a: 1}
   m_Intensity: 1
   m_Range: 10
   m_SpotAngle: 30
@@ -276,4 +263,3 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   attachedLight: {fileID: 108000012119899942}
-  foveInterface: {fileID: 0}

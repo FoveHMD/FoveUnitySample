@@ -19,7 +19,7 @@ public class FOVE3DCursor : FOVEBehavior
 	// Latepdate ensures that the object doesn't lag behind the user's head motion
 	void Update()
     {
-		var rays = FoveInterface.GetGazeRays();
+		var rays = FoveInterface.GetGazeRays().value;
 		var ray = whichEye == LeftOrRight.Left ? rays.left : rays.right;
 
 		RaycastHit hit;

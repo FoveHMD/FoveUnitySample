@@ -17,3 +17,5 @@ MonoBehaviour:
   customDesktopView: 0
   worldScale: 1
   renderScale: 1
+  automaticObjectRegistration: 0
+  gazeCastPolicy: 0

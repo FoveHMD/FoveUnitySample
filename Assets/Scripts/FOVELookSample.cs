@@ -21,7 +21,7 @@ public class FOVELookSample : FOVEBehavior
 			light_attached = true;
 			attachedLight.enabled = false;
 		}
-		material = gameObject.GetComponent<Renderer>().material;
+		material = GetComponent<Renderer>().material;
 
 		if (material == null)
 			gameObject.SetActive(false);
@@ -29,27 +29,28 @@ public class FOVELookSample : FOVEBehavior
 	
 	void Update ()
     {
-		if (FoveInterface.Gazecast(my_collider))
-		{
-			material.EnableKeyword("_EMISSION");
+		var isGazed = FoveSettings.AutomaticObjectRegistration
+			? FoveManager.GetGazedObject() == gameObject // use the Object detection API
+			: FoveInterface.Gazecast(my_collider); // Manually perform gaze cast on scene colliders
 
-			if (light_attached)
-			{
-				material.SetColor("_EmissionColor", attachedLight.color);
-				attachedLight.enabled = true;
-				DynamicGI.SetEmissive(GetComponent<Renderer>(), attachedLight.color);
-			}
+		Color emissiveColor;
+
+		if (isGazed)
+		{
+			emissiveColor = attachedLight.color;
+			material.EnableKeyword("_EMISSION");
 		}
 		else
 		{
-			gameObject.GetComponent<Renderer> ().material.color = Color.white;
+			emissiveColor = Color.black;
 			material.DisableKeyword("_EMISSION");
+		}
 
-			if (light_attached)
-			{
-				attachedLight.enabled = false;
-				DynamicGI.SetEmissive(GetComponent<Renderer>(), Color.black);
-			}
+		if (light_attached)
+		{
+			attachedLight.enabled = isGazed;
+			DynamicGI.SetEmissive(GetComponent<Renderer>(), emissiveColor);
+			material.SetColor("_EmissionColor", attachedLight.color);
 		}
 	}
 }
