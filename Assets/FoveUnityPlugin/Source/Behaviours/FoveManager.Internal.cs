@@ -3,10 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-using UnityEngine.Events;
 using UnityEngine;
 
 using System.Linq;
+using AOT;
 
 namespace Fove.Unity
 {
@@ -14,63 +14,60 @@ namespace Fove.Unity
     public partial class FoveManager
     {
         // Static members
-        private static FoveManager m_sInstance;
-        private Headset m_headset;
-
-        // Data update events
-        private static PoseUpdateEvent _sPoseEvt = new PoseUpdateEvent();
-        private static EyePositionEvent _sEyePositionEvt = new EyePositionEvent();
-        private static GazeEvent _sGazeEvt = new GazeEvent();
-
-        // Matrix update events don't include the projection matrix because each camera may have a different
-        // near/far plane setting and so the matrix itself cannot be used. Instead, each subscriber must
-        // call into FoveManager.Instance.GetProjectionMatrices itself on this event.
-        private static EyeProjectionEvent _sEyeProjectionEvt = new EyeProjectionEvent();
-    
-        // Static caches
-        private static Pose m_sLastPose = Pose.Null;
-        private static Quaternion m_sHeadRotation = Quaternion.identity;
-        private static Vector3 m_sHeadPosition;
-        private static Vector3 m_sStandingPosition;
-
-        private static Result<Stereo<Vector3>> m_sEyeOffsets = new Result<Stereo<Vector3>>(new Stereo<Vector3>(Vector3.zero), ErrorCode.Data_NoUpdate);
-        private static Result<Eye> m_sEyeClosed = new Result<Eye>(Eye.Both, ErrorCode.Data_NoUpdate);
-
-        // Values users may ask for
-        private static Result<Stereo<Vector3>> m_sEyeVectors = new Result<Stereo<Vector3>>(new Stereo<Vector3>(Vector3.forward), ErrorCode.Data_NoUpdate);
-        private static Result<GazeConvergenceData> m_sConvergenceData = new Result<GazeConvergenceData>(GazeConvergenceData.ForwardToInfinity, ErrorCode.Data_NoUpdate);
-        private static Result<float> m_sPupilDilation = new Result<float>(1.0f, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsHardwareConnected = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsHardwareReady = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsCalibrating = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsCalibrated = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<CalibrationState> m_sCalibationState = new Result<CalibrationState>(CalibrationState.NotStarted, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsGazeFixated = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsUserPresent = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<bool> m_sIsHmdAdjustmentVisible = new Result<bool>(false, ErrorCode.Data_NoUpdate);
-        private static Result<int> m_sGazedObjectId = new Result<int>(Fove.GazableObject.IdInvalid, ErrorCode.Data_NoUpdate);
-
-        // Settings cache for runtime
-        private static float m_worldScale = 1.0f;
-        private static float m_renderScale = 1.0f;
-    
-        // Rendering/submission native pointers
-        private static IntPtr m_submitNativeFunc;
-        private static IntPtr m_wfrpNativeFunc;
-
-        private Material m_screenBlitMaterial;
-
-        private static ClientCapabilities m_sCurrentCapabilities = ClientCapabilities.None;
-        private static ClientCapabilities m_sEnforcedCapabilities = ClientCapabilities.None;
+        private static FoveManager sInstance;
 
         // static awaiters
         private static WaitUntil m_sWaitForHardwareConnected = new WaitUntil(() => IsHardwareConnected());
         private static WaitUntil m_sWaitForHardwareDisconnected = new WaitUntil(() => !IsHardwareConnected());
-        private static WaitUntil m_sWaitForHardwareReady = new WaitUntil(() => IsHardwareReady());
         private static WaitUntil m_sWaitForCalibrationStart = new WaitUntil(() => IsEyeTrackingCalibrating());
         private static WaitUntil m_sWaitForCalibrationEnd = new WaitUntil(() => !IsEyeTrackingCalibrating());
         private static WaitUntil m_sWaitForCalibrationCalibrated = new WaitUntil(() => IsEyeTrackingCalibrated());
         private static WaitUntil m_sWaitForUser = new WaitUntil(() => IsUserPresent());
+
+        // The headset instance
+        private Headset headset;
+
+        // Caches
+        private Pose hmdPose = Pose.Null;
+        private Quaternion headRotation = Quaternion.identity;
+        private Vector3 headPosition;
+        private Vector3 standingPosition;
+
+        // Previous frame values cached to identify state changes
+        private Stereo<EyeState> previousEyeStates = new Stereo<EyeState>(EyeState.NotDetected);
+        private bool wasHardwareConnected = false;
+        private bool wasCalibrating = false;
+        private bool wasShiftingAttention = false;
+        private bool wasUserPresent = false;
+        private bool wasHmdAdjustmentVisible = false;
+
+        // Settings cache for runtime
+        private float worldScale = 1.0f;
+        private float renderScale = 1.0f;
+
+        // Rendering/submission native pointers
+        private IntPtr submitNativeFunc;
+        private IntPtr wfrpNativeFunc;
+        private IntPtr updateMirrorTexNativeFunc;
+
+        // Capabilities
+        private ClientCapabilities currentCapabilities = ClientCapabilities.None;
+        private ClientCapabilities enforcedCapabilities = ClientCapabilities.None;
+
+        // Camera Images & Textures
+        private Bitmap eyesImage;
+        private Bitmap positionImage;
+        private Result<Texture2D> eyesTexture = new Result<Texture2D>(null, ErrorCode.Data_NoUpdate);
+        private Result<Texture2D> positionTexture = new Result<Texture2D>(null, ErrorCode.Data_NoUpdate);
+        private Result<Texture2D> mirrorTexture = new Result<Texture2D>(null, ErrorCode.Data_NoUpdate);
+
+        private IntPtr mirrorTexPtr;
+        private int mirrorTexWidth;
+        private int mirrorTexHeight;
+
+        // Explicit backend initialization for mirror-only apps
+        private bool isBackendInitialized = false;
+        private bool isMirrorRequested = false;
 
         private class EyeTextures
         {
@@ -78,60 +75,39 @@ namespace Fove.Unity
             public RenderTexture right;
             public bool areNew;
         }
-        private static Dictionary<int, EyeTextures> m_sEyeTextures = new Dictionary<int, EyeTextures>();
+        private Dictionary<int, EyeTextures> eyeTextures = new Dictionary<int, EyeTextures>();
+
+        private Material screenBlitMaterial;
 
         /// <summary>
         /// The fove manager instance that is communicating and managing the HMD.
         /// </summary>
         internal static FoveManager Instance
         {
-            get {
-                if (m_sInstance == null)
-                    InitializeStaticMembers();
-
-                return m_sInstance;
-            }
-        }
-
-        private static void InitializeStaticMembers()
-        {
-            m_sInstance = FindObjectOfType<FoveManager>();
-            if (m_sInstance == null)
+            get
             {
-                m_sInstance = new GameObject("~FOVE Manager").AddComponent<FoveManager>();
-                DontDestroyOnLoad(m_sInstance);
+                if (sInstance == null)
+                {
+                    sInstance = FindObjectOfType<FoveManager>();
+                    if (sInstance == null)
+                    {
+                        sInstance = new GameObject("~FOVE Manager").AddComponent<FoveManager>();
+                        DontDestroyOnLoad(Instance);
+                    }
+                }
+
+                return sInstance;
             }
-
-            m_worldScale = FoveSettings.WorldScale;
-            m_renderScale = FoveSettings.RenderScale;
-
-            m_submitNativeFunc = UnityFuncs.GetSubmitFunctionPtr();
-            m_wfrpNativeFunc = UnityFuncs.GetWfrpFunctionPtr();
         }
-
-        // Data update events
-        internal class PoseUpdateEvent : UnityEvent<Vector3, Vector3, Quaternion> { }
-        internal static PoseUpdateEvent PoseUpdate { get { return _sPoseEvt; } }
-
-        // Matrix update events don't include the projection matrix because each camera may have a different
-        // near/far plane setting and so the matrix itself cannot be used. Instead, each subscriber must
-        // call into FoveManager.Instance.GetProjectionMatrices itself on this event.
-        internal class EyeProjectionEvent : UnityEvent { }
-        internal static EyeProjectionEvent EyeProjectionUpdate { get { return _sEyeProjectionEvt; } }
-
-        internal class EyePositionEvent : UnityEvent<Result<Stereo<Vector3>>> { }
-        internal static EyePositionEvent EyePositionUpdate { get { return _sEyePositionEvt; } }
-
-        internal class GazeEvent : UnityEvent<Result<GazeConvergenceData>, Result<Stereo<Vector3>>> { }
-        internal static GazeEvent GazeUpdate { get { return _sGazeEvt; } }
 
         private enum LogLevel
         {
             Error,   // Lowest level, this should contain only errors
-            Warning, // Warnings should be logged here               
-            Debug,   // Generic debugging info can go here          
+            Warning, // Warnings should be logged here
+            Debug,   // Generic debugging info can go here
         };
 
+        [MonoPInvokeCallback(typeof(LogSinkDelegate))]
         private static void LogSinkCallback(IntPtr logLevel, string str)
         {
             str = "[FOVE] " + str;
@@ -157,7 +133,6 @@ namespace Fove.Unity
         private EyeTextures MakeNewEyeTextures(int layerId, Vec2i dims)
         {
             EyeTextures result;
-#if UNITY_2017_1_OR_NEWER
             RenderTextureDescriptor desc = new RenderTextureDescriptor (
                 dims.x, dims.y, RenderTextureFormat.Default, 32 );
 
@@ -167,16 +142,8 @@ namespace Fove.Unity
                 right = new RenderTexture(desc),
                 areNew = true
             };
-#else
-            result = new EyeTextures
-            {
-                left = new RenderTexture(dims.x, dims.y, 32, RenderTextureFormat.Default),
-                right = new RenderTexture(dims.x, dims.y, 32, RenderTextureFormat.Default),
-                areNew = true
-            };
-#endif
 
-            m_sEyeTextures[layerId] = result;
+            eyeTextures[layerId] = result;
 
             return result;
         }
@@ -184,16 +151,16 @@ namespace Fove.Unity
         private EyeTextures GetEyeTextures(int layerId)
         {
             EyeTextures result;
-        
+
             Vec2i dims = new Vec2i(1, 1);
             UnityFuncs.GetIdealLayerDimensions(layerId, ref dims);
 
-            dims.x = (int)(dims.x * m_renderScale);
-            dims.y = (int)(dims.y * m_renderScale);
+            dims.x = (int)(dims.x * renderScale);
+            dims.y = (int)(dims.y * renderScale);
 
-            if (m_sEyeTextures.ContainsKey(layerId))
+            if (eyeTextures.ContainsKey(layerId))
             {
-                result = m_sEyeTextures[layerId];
+                result = eyeTextures[layerId];
 
                 if (dims.x != result.left.width || dims.y != result.left.height)
                     result = MakeNewEyeTextures(layerId, dims);
@@ -216,12 +183,54 @@ namespace Fove.Unity
 
         private static List<InterfaceInfo> m_sUnregisteredInterfaces = new List<InterfaceInfo>();
 
+        /*******************************************************************************\
+         * MonoBehaviour / instance methods                                            *
+        \*******************************************************************************/
+        private FoveManager()
+        {
+            if (sInstance != null)
+                Debug.LogError("Found an existing instance");
+
+            var logSinkDelegatePtr = Marshal.GetFunctionPointerForDelegate(logSinkDelegate);
+            UnityFuncs.SetLogSinkFunction(logSinkDelegatePtr);
+
+            headset = new Headset(currentCapabilities);
+
+            submitNativeFunc = UnityFuncs.GetSubmitFunctionPtr();
+            wfrpNativeFunc = UnityFuncs.GetWfrpFunctionPtr();
+            updateMirrorTexNativeFunc = UnityFuncs.GetUpdateMirrorTexPtrFunctionPtr();
+        }
+
+        void Awake()
+        {
+            worldScale = FoveSettings.WorldScale;
+            renderScale = FoveSettings.RenderScale;
+            EnsureCalibration = FoveSettings.EnsureCalibration;
+            UseVRStereoViewOnPC = FoveSettings.UseVRStereoViewOnPC;
+            UnityFuncs.ResetNativeState();
+            screenBlitMaterial = new Material(Shader.Find("Fove/EyeShader"));
+
+            if (FoveSettings.AutomaticObjectRegistration)
+                GazableObject.CreateFromSceneColliders();
+        }
+
+        void Start()
+        {
+            StartCoroutine(CheckServiceRunningCoroutine());
+        }
+
+        private void OnDestroy()
+        {
+            headset.Dispose();
+            UnityFuncs.DestroyNativeResources();
+        }
+
         internal static void RegisterInterface(CompositorLayerCreateInfo info, FoveInterface xface)
         {
             if (Instance == null) // query forces it to exist
                 return;
-            
-            m_sUnregisteredInterfaces.Add(new InterfaceInfo{info = info, xface = xface});
+
+            m_sUnregisteredInterfaces.Add(new InterfaceInfo { info = info, xface = xface });
         }
 
         private static void RegisterHelper(InterfaceInfo reg)
@@ -245,7 +254,7 @@ namespace Fove.Unity
                 }
             }
 
-            theStack.Insert(idx, reg);            
+            theStack.Insert(idx, reg);
         }
 
         internal static void UnregisterInterface(FoveInterface xface)
@@ -275,66 +284,33 @@ namespace Fove.Unity
             Func<FoveInterface, ClientCapabilities> getCapabilities = xface =>
             {
                 var capabilities = ClientCapabilities.None;
-                if(xface.isActiveAndEnabled)
+                if (xface.isActiveAndEnabled)
                 {
                     if (xface.fetchGaze)
-                        capabilities |= ClientCapabilities.Gaze;
+                        capabilities |= ClientCapabilities.EyeTracking | ClientCapabilities.GazeDepth;
                     if (xface.fetchOrientation)
-                        capabilities |= ClientCapabilities.Orientation;
+                        capabilities |= ClientCapabilities.OrientationTracking;
                     if (xface.fetchPosition)
-                        capabilities |= ClientCapabilities.Position;
+                        capabilities |= ClientCapabilities.PositionTracking;
+
+                    // the orientation capability is needed when submitting frames for proper time-warping
+                    if (!xface.TimewarpDisabled)
+                        capabilities |= ClientCapabilities.OrientationTracking;
                 }
                 return capabilities;
             };
 
             var aggregatedCaps = ClientCapabilities.None;
-
-            foreach(var interfaceList in m_sInterfaceStacks.Values)
+            foreach (var interfaceList in m_sInterfaceStacks.Values)
                 foreach (var interfaceInfo in interfaceList)
                     aggregatedCaps |= getCapabilities(interfaceInfo.xface);
 
             // Also take into account unregistered interface in order to avoid to have 1 frame of delay
             // (even if internally add/removing a new capability may take more than 1 frame anyway)
-            foreach(var interfaceInfo in m_sUnregisteredInterfaces)
+            foreach (var interfaceInfo in m_sUnregisteredInterfaces)
                 aggregatedCaps |= getCapabilities(interfaceInfo.xface);
 
             return aggregatedCaps;
-        }
-        
-        /*******************************************************************************\
-         * MonoBehaviour / instance methods                                            *
-        \*******************************************************************************/
-        private FoveManager()
-        {
-            if (m_sInstance != null)
-                Debug.LogError("Found an existing instance");
-
-            var logSinkDelegatePtr = Marshal.GetFunctionPointerForDelegate(logSinkDelegate);
-            UnityFuncs.SetLogSinkFunction(logSinkDelegatePtr);
-
-            m_headset = new Headset(m_sCurrentCapabilities);
-        }
-
-        void Awake()
-        {
-            m_headset.GazeCastPolicy = FoveSettings.GazeCastPolicy;
-
-            UnityFuncs.ResetNativeState();
-            m_screenBlitMaterial = new Material(Shader.Find("Fove/EyeShader"));
-
-            if (FoveSettings.AutomaticObjectRegistration)
-                GazableObject.CreateFromSceneColliders();
-        }
-
-        void Start()
-        {
-            StartCoroutine(CheckServiceRunningCoroutine());
-        }
-
-        private void OnDestroy()
-        {
-            m_headset.Dispose();
-            UnityFuncs.DestroyNativeResources();
         }
 
         private IEnumerator CheckServiceRunningCoroutine()
@@ -351,7 +327,7 @@ namespace Fove.Unity
         private bool CheckServiceRunning(bool logNotConnected)
         {
             var err = CheckSoftwareVersions();
-            switch (err.value)
+            switch (err.error)
             {
                 case ErrorCode.None:
                     return true;
@@ -361,7 +337,7 @@ namespace Fove.Unity
                 case ErrorCode.Connect_RuntimeVersionTooOld:
                     Debug.LogError("Fove runtime version is too old; please update your runtime.");
                     return true;
-                case ErrorCode.Server_General:
+                case ErrorCode.UnknownError:
                     Debug.LogError("An unhandled exception was thrown by Fove CheckSoftwareVersions");
                     return true;
                 case ErrorCode.Connect_NotConnected:
@@ -369,7 +345,7 @@ namespace Fove.Unity
                         Debug.Log("No runtime service found. Please start the fove runtime service.");
                     return false;
                 default:
-                    Debug.LogError("An unknown error was returned by Fove CheckSoftwareVersions: " + err);
+                    Debug.LogError("An unknown error was returned by Fove CheckSoftwareVersions: " + err.error);
                     return true;
             }
         }
@@ -379,7 +355,7 @@ namespace Fove.Unity
             var wait = new WaitForSecondsRealtime(0.5f);
             while (true)
             {
-                if (IsHardwareConnected(true))
+                if (IsHardwareConnected())
                     break;
 
                 // Try again in a half second
@@ -392,22 +368,25 @@ namespace Fove.Unity
 
         private IEnumerator FoveUpdateCoroutine()
         {
-            if (FoveSettings.ShouldForceCalibration)
+            if (EnsureCalibration)
                 StartEyeTrackingCalibration(new CalibrationOptions { lazy = true });
 
             var endOfFrameWait = new WaitForEndOfFrame();
 
             while (Application.isPlaying)
             {
-                if(!UpdateHmdData()) // hmd got disconnected
-                    break;
-
                 // update the headset capabilities if changed
                 UpdateCapabilities();
 
+                if (!UpdateHmdDataInternal()) // HMD got disconnected, exist and wait for new connection
+                    break;
+
                 // Don't do any rendering code (below) if the compositor isn't ready
                 if (!CompositorReadyCheck())
+                {
+                    yield return endOfFrameWait;
                     continue;
+                }
 
                 // On first run and in case any new FoveInterfaces have been created
                 if (m_sUnregisteredInterfaces.Count > 0)
@@ -427,7 +406,7 @@ namespace Fove.Unity
                     int layerId = list.Key;
                     var eyeTx = GetEyeTextures(layerId);
 
-                    UnityFuncs.SetPoseForSubmit(layerId, m_sLastPose);
+                    UnityFuncs.SetPoseForSubmit(layerId, hmdPose);
 
                     if (eyeTx.areNew)
                     {
@@ -463,22 +442,31 @@ namespace Fove.Unity
                     }
 
                     GL.Flush();
-                    GL.IssuePluginEvent(m_submitNativeFunc, layerId);
+                    GL.IssuePluginEvent(submitNativeFunc, layerId);
 
-                    if (!FoveSettings.CustomDesktopView)
+                    isBackendInitialized = true; // Submit implicitly initializes the backend
+
+                    if (UseVRStereoViewOnPC)
                     {
                         // this code works only because we only have one single layer (base) allowed for the moment
                         // TODO: Adapt this code as soon as we allow several layers
                         RenderTexture.active = oldCurrent;
-                        m_screenBlitMaterial.SetTexture("_TexLeft", eyeTx.left);
-                        m_screenBlitMaterial.SetTexture("_TexRight", eyeTx.right);
-                        Graphics.Blit(null, m_screenBlitMaterial);
+                        screenBlitMaterial.SetTexture("_TexLeft", eyeTx.left);
+                        screenBlitMaterial.SetTexture("_TexRight", eyeTx.right);
+                        Graphics.Blit(null, screenBlitMaterial);
                     }
                 }
                 GL.Flush();
 
+                if (!isBackendInitialized && isMirrorRequested)
+                {
+                    InitBackendExplicit();
+                    isBackendInitialized = true;
+                }
+
                 // Wait for render pose
-                GL.IssuePluginEvent(m_wfrpNativeFunc, 0);
+                GL.IssuePluginEvent(updateMirrorTexNativeFunc, 0);
+                GL.IssuePluginEvent(wfrpNativeFunc, 0);
 
                 yield return endOfFrameWait;
             }
@@ -486,54 +474,45 @@ namespace Fove.Unity
             StartCoroutine(CheckForHeadsetCoroutine());
         }
 
-        private static void UpdateCapabilities()
+        private void UpdateCapabilities()
         {
-            var newCapabilities = ComputeInterfacesCapabilities() | m_sEnforcedCapabilities;
-            if (m_sCurrentCapabilities != newCapabilities)
+            var newCapabilities = ComputeInterfacesCapabilities() | enforcedCapabilities;
+            if (currentCapabilities != newCapabilities)
             {
-                var removedCaps = m_sCurrentCapabilities & ~newCapabilities;
+                var removedCaps = currentCapabilities & ~newCapabilities;
                 if (removedCaps != ClientCapabilities.None)
                 {
                     UnityFuncs.UnregisterCapabilities(removedCaps);
                     Headset.UnregisterCapabilities(removedCaps);
                 }
 
-                var addedCaps = newCapabilities & ~m_sCurrentCapabilities;
+                var addedCaps = newCapabilities & ~currentCapabilities;
                 if (addedCaps != ClientCapabilities.None)
                 {
                     UnityFuncs.RegisterCapabilities(addedCaps);
                     Headset.RegisterCapabilities(addedCaps);
                 }
 
-                m_sCurrentCapabilities = newCapabilities;
+                currentCapabilities = newCapabilities;
             }
         }
 
-        private static bool UpdateHmdData()
+        private bool UpdateHmdDataInternal()
         {
             var isHmdConnectedChanged = false;
-            var isGazeFixedChanged = false;
-            var eyeClosedChanged = false;
-            var hardwareReadyChanged = false;
-            var isCalibratingChanged = false;
-            var isCalibratedChanged = false;
-            var isUserPresentChanged = false;
-            var isHmdAdjustmentGuiChanged = false;
 
-            // First chech and update the HMD connection status
+            // First check and update the HMD connection status
             // If the HMD happens to be disconnected we trigger the associated event and abort the update process
             // If the HMD status changed to connected, we delay the trigger of the associated event after the update of other data
             {
-                bool isHmdConnected;
-                var error = Headset.IsHardwareConnected(out isHmdConnected);
-                if (error == ErrorCode.Hardware_Disconnected) // this returns an error whereas it is was we are querying, so we just ignore it...
-                    error = ErrorCode.None;
+                var isHmdConnected = Headset.IsHardwareConnected();
+                if (isHmdConnected.error == ErrorCode.Hardware_Disconnected) // this returns an error whereas it is what we are querying, so we just ignore it...
+                    isHmdConnected.error = ErrorCode.None;
 
-                if (isHmdConnected != m_sIsHardwareConnected)
+                if (isHmdConnected != wasHardwareConnected)
                 {
                     isHmdConnectedChanged = true;
-                    m_sIsHardwareConnected.error = error;
-                    m_sIsHardwareConnected.value = isHmdConnected;
+                    wasHardwareConnected = isHmdConnected;
                     if (!isHmdConnected)
                     {
                         // trigger the hmd disconnected event before returning
@@ -546,136 +525,37 @@ namespace Fove.Unity
                 }
             }
 
+            // Fetch the new eye tracking data from the service
+            Headset.FetchEyeTrackingData();
+
+            // Fetch the new pose data from the service
+            Headset.FetchPoseData();
+
+            // Update images (if caps not registered, early error exit is triggered)
+            Headset.FetchEyesImage();
+            Headset.FetchPositionImage();
+
             // HMD pose
-            m_sLastPose = UnityFuncs.GetLastPose();
-            m_sHeadPosition = m_sLastPose.position.ToVector3() * m_worldScale;
-            m_sStandingPosition = m_sLastPose.standingPosition.ToVector3() * m_worldScale;
-            m_sHeadRotation = m_sLastPose.orientation.ToQuaternion();
+            // It is taken from the UnityFunction native plugin to be sure to return
+            // the same pose as the one used to perform the rendering
+            hmdPose = UnityFuncs.GetLastPose();
+            headPosition = hmdPose.position.ToVector3() * worldScale;
+            standingPosition = hmdPose.standingPosition.ToVector3() * worldScale;
+            headRotation = hmdPose.orientation.ToQuaternion();
 
-            // Gaze vectors
+            // Update the eyes & position textures
+            TryUpdateTexture(Headset.GetEyesImage, ref eyesImage, ref eyesTexture);
+            TryUpdateTexture(Headset.GetPositionImage, ref positionImage, ref positionTexture);
+
+            // update the mirror texture native pointer if is exists
+            // we need this update because of the rolling buffer
+            if (mirrorTexture.value != null)
             {
-                GazeVector lGaze, rGaze;
-                m_sEyeVectors.error = Headset.GetGazeVectors(out lGaze, out rGaze);
-                if (m_sEyeVectors.Succeeded)
-                {
-                    m_sEyeVectors.value.left = lGaze.vector.ToVector3();
-                    m_sEyeVectors.value.right = rGaze.vector.ToVector3();
-                }
+                int dummy;
+                IntPtr texPtr;
+                GetMirrorTexturePtr(out texPtr, out dummy, out dummy);
+                mirrorTexture.value.UpdateExternalTexture(texPtr);
             }
-
-            // Gaze convergence
-            {
-                Fove.GazeConvergenceData conv;
-                var errConv = Headset.GetGazeConvergence(out conv);
-
-                m_sIsGazeFixated.error = errConv;
-                m_sPupilDilation.error = errConv;
-                m_sGazedObjectId.error = errConv;
-                m_sConvergenceData.error = errConv;
-
-                if (errConv == ErrorCode.None)
-                {
-                    isGazeFixedChanged = m_sIsGazeFixated != conv.attention;
-                    
-                    var convRay = conv.ray.ToRay();
-                    m_sPupilDilation.value = conv.pupilDilation;
-                    m_sIsGazeFixated.value = conv.attention;
-                    m_sGazedObjectId.value = conv.gazedObjectId;
-                    m_sConvergenceData.value.distance = m_worldScale * conv.distance;
-                    m_sConvergenceData.value.ray = new Ray(m_worldScale * convRay.origin, convRay.direction);
-                }
-            }
-
-            // Eye offset vectors
-            {
-                Matrix44 lEyeMx, rEyeMx;
-                m_sEyeOffsets.error = Headset.GetEyeToHeadMatrices(out lEyeMx, out rEyeMx);
-                if (m_sEyeOffsets.Succeeded)
-                {
-                    GetEyeOffsetVector(ref lEyeMx, out m_sEyeOffsets.value.left);
-                    GetEyeOffsetVector(ref rEyeMx, out m_sEyeOffsets.value.right);
-                }
-            }
-
-            // Eye closed
-            {
-                Eye eyeClosed;
-                m_sEyeClosed.error = Headset.CheckEyesClosed(out eyeClosed);
-                if (m_sEyeClosed.Succeeded)
-                {
-                    eyeClosedChanged = eyeClosed != m_sEyeClosed;
-                    m_sEyeClosed.value = eyeClosed;
-                }
-            }
-
-            // Hardware Ready
-            {
-                bool isReady;
-                m_sIsHardwareReady.error = Headset.IsHardwareReady(out isReady);
-                if (m_sIsHardwareReady.Succeeded)
-                {
-                    hardwareReadyChanged = m_sIsHardwareReady != isReady;
-                    m_sIsHardwareReady.value = isReady;
-                }
-            }
-
-            // Is Calibrating
-            {
-                bool isCalibrating;
-                m_sIsCalibrating.error = Headset.IsEyeTrackingCalibrating(out isCalibrating);
-                if (m_sIsCalibrating.Succeeded)
-                {
-                    isCalibratingChanged = m_sIsCalibrating != isCalibrating;
-                    m_sIsCalibrating.value = isCalibrating;
-                }
-            }
-
-            // Is Calibrated
-            {
-                bool isCalibrated;
-                m_sIsCalibrated.error = Headset.IsEyeTrackingCalibrated(out isCalibrated);
-                if (m_sIsCalibrated.Succeeded)
-                {
-                    isCalibratedChanged = m_sIsCalibrated != isCalibrated;
-                    m_sIsCalibrated.value = isCalibrated;
-                }
-            }
-
-            // Calibration state
-            {
-                CalibrationState state;
-                m_sCalibationState.error = Headset.GetEyeTrackingCalibrationState(out state);
-                if (m_sCalibationState.Succeeded)
-                    m_sCalibationState.value = state;
-            }
-
-            // User presence
-            {
-                bool userPresent;
-                m_sIsUserPresent.error = Headset.IsUserPresent(out userPresent);
-                if (m_sIsUserPresent.Succeeded)
-                {
-                    isUserPresentChanged = m_sIsUserPresent != userPresent;
-                    m_sIsUserPresent.value = userPresent;
-                }
-            }
-
-            // Hmd Adjustment Gui
-            {
-                bool guiVisible;
-                m_sIsHmdAdjustmentVisible.error = Headset.IsHmdAdjustmentGuiVisible(out guiVisible);
-                if (m_sIsHmdAdjustmentVisible.Succeeded)
-                {
-                    isHmdAdjustmentGuiChanged = m_sIsHmdAdjustmentVisible != guiVisible;
-                    m_sIsHmdAdjustmentVisible.value = guiVisible;
-                }
-            }
-
-            // Trigger the different internal registered data updates
-            PoseUpdate.Invoke(m_sHeadPosition, m_sStandingPosition, m_sHeadRotation);
-            EyePositionUpdate.Invoke(m_sEyeOffsets);
-            EyeProjectionUpdate.Invoke();
-            GazeUpdate.Invoke(m_sConvergenceData, m_sEyeVectors);
 
             // Call user custom data update callbacks
             var addInUpdateCallback = AddInUpdate;
@@ -685,7 +565,7 @@ namespace Fove.Unity
             // Trigger the event callbacks now that have updated all the HMD data
             if (isHmdConnectedChanged)
             {
-                if (!m_sIsHardwareConnected)
+                if (!wasHardwareConnected)
                     throw new Exception("Internal error: Unexpected hmd connection status");
 
                 var handler = HardwareConnected;
@@ -693,16 +573,10 @@ namespace Fove.Unity
                     handler.Invoke();
             }
 
-            if (hardwareReadyChanged && m_sIsHardwareReady)
+            var isCalibrating = IsEyeTrackingCalibrating();
+            if (isCalibrating.IsValid && isCalibrating != wasCalibrating)
             {
-                var handler = HardwareIsReady;
-                if (handler != null)
-                    handler.Invoke();
-            }
-
-            if (isCalibratingChanged)
-            {
-                if (m_sIsCalibrating)
+                if (isCalibrating)
                 {
                     var handler = EyeTrackingCalibrationStarted;
                     if (handler != null)
@@ -712,54 +586,148 @@ namespace Fove.Unity
                 {
                     var handler = EyeTrackingCalibrationEnded;
                     if (handler != null)
-                        handler.Invoke(m_sCalibationState.value);
+                        handler.Invoke(GetEyeTrackingCalibrationState());
                 }
+                wasCalibrating = isCalibrating;
             }
 
-            if (isGazeFixedChanged)
+            var userAttention = IsUserShiftingAttention();
+            if (userAttention.IsValid && wasShiftingAttention != userAttention)
             {
-                var handler = IsGazeFixatedChanged;
+                wasShiftingAttention = userAttention;
+                var handler = IsUserShiftingAttentionChanged;
                 if (handler != null)
-                    handler.Invoke(m_sIsGazeFixated.value);
+                    handler.Invoke(wasShiftingAttention);
             }
 
-            if (eyeClosedChanged)
-            {
-                var handler = EyesClosedChanged;
-                if (handler != null)
-                    handler.Invoke(m_sEyeClosed.value);
-            }
+            UpdateEyeState(Eye.Left);
+            UpdateEyeState(Eye.Right);
 
-            if (isUserPresentChanged)
+            var userPresent = IsUserPresent();
+            if (userPresent.IsValid && wasUserPresent != userPresent)
             {
+                wasUserPresent = userPresent;
                 var handler = UserPresenceChanged;
                 if (handler != null)
-                    handler.Invoke(m_sIsUserPresent.value);
+                    handler.Invoke(wasUserPresent);
             }
 
-            if (isHmdAdjustmentGuiChanged)
+            var adjusmentGuiVisible = IsHmdAdjustmentGuiVisible();
+            if (adjusmentGuiVisible.IsValid && wasHmdAdjustmentVisible != adjusmentGuiVisible)
             {
+                wasHmdAdjustmentVisible = adjusmentGuiVisible;
                 var handler = HmdAdjustmentGuiVisibilityChanged;
                 if (handler != null)
-                    handler.Invoke(m_sIsHmdAdjustmentVisible.value);
+                    handler.Invoke(wasHmdAdjustmentVisible);
             }
 
             return true;
         }
 
-        private static void GetEyeOffsetVector(ref Matrix44 eyeToHeadMatrix, out Vector3 eyeOffsetVector)
+        private void UpdateEyeState(Eye eye)
+        {
+            var eyeState = GetEyeState(eye);
+            if (eyeState.IsValid && previousEyeStates[eye] != eyeState)
+            {
+                previousEyeStates[eye] = eyeState;
+                var handler = EyeStateChanged;
+                if (handler != null)
+                    handler.Invoke(eye, eyeState);
+            }
+        }
+
+        private Vector3 GetEyeOffsetVector(Matrix44 eyeToHeadMatrix)
         {
             float iod = eyeToHeadMatrix.m03;
             float eyeHeight = eyeToHeadMatrix.m13;
             float eyeForward = eyeToHeadMatrix.m23;
-            eyeOffsetVector = new Vector3(iod, eyeHeight, eyeForward) * m_worldScale;
+            return new Vector3(iod, eyeHeight, eyeForward) * worldScale;
         }
 
         private static bool CompositorReadyCheck()
         {
-            var isCompositorReady = false; 
+            var isCompositorReady = false;
             UnityFuncs.IsCompositorReady(ref isCompositorReady);
             return isCompositorReady;
+        }
+
+        private static void TryUpdateTexture(Func<Result<Bitmap>> getImageFunc, ref Bitmap cacheImg, ref Result<Texture2D> texResult)
+        {
+            try
+            {
+                var imgResult = getImageFunc();
+
+                texResult.error = imgResult.error;
+                if (!texResult.IsValid)
+                    return;
+
+                if (cacheImg != null && imgResult.value.Timestamp <= cacheImg.Timestamp)
+                    return;
+
+                cacheImg = imgResult.value;
+                if (cacheImg.Width == 0 || cacheImg.Height == 0)
+                    return;
+
+                var tex = texResult.value;
+                if (tex != null && (tex.width != cacheImg.Width || tex.height != cacheImg.Height))
+                {
+                    Texture2D.Destroy(tex);
+                    tex = null;
+                }
+
+                if (tex == null)
+                    tex = new Texture2D(cacheImg.Width, cacheImg.Height, TextureFormat.RGB24, false);
+
+                tex.LoadRawTextureData(cacheImg.ImageData.data, (int)cacheImg.ImageData.length);
+                tex.Apply();
+
+                texResult.value = tex;
+            }
+            catch (Exception e)
+            {
+                Debug.Log("Error trying to load image bitmap: " + e);
+            }
+        }
+
+        private void InitBackendExplicit()
+        {
+            try
+            {
+                Debug.Log("Explicitly initializing backend");
+                Texture2D tempTexture = new Texture2D(1, 1, TextureFormat.RGB24, false);
+                ErrorCode error = InitBackend(tempTexture.GetNativeTexturePtr());
+                if (error != ErrorCode.None)
+                    Debug.Log("Failed to initialize backend: " + error);
+                Texture2D.Destroy(tempTexture);
+            }
+            catch (Exception e)
+            {
+                Debug.Log("Error trying to initialize backend: " + e);
+            }
+        }
+
+        public Result<Texture2D> GetMirrorTextureInternal()
+        {
+            isMirrorRequested = true;
+
+            IntPtr texPtr;
+            int texWidth, texHeight;
+            GetMirrorTexturePtr(out texPtr, out texWidth, out texHeight);
+            if (texPtr != IntPtr.Zero // the mirror texture doesn't exist yet
+                && (mirrorTexture.value == null || texPtr != mirrorTexPtr || texWidth != mirrorTexWidth || texHeight != mirrorTexHeight))
+            {
+                mirrorTexPtr = texPtr;
+                mirrorTexWidth = texWidth;
+                mirrorTexHeight = texHeight;
+
+                if (mirrorTexture.value)
+                    Destroy(mirrorTexture.value);
+
+                mirrorTexture.value = Texture2D.CreateExternalTexture(texWidth, texHeight, TextureFormat.RGBA32, false, false, texPtr);
+                mirrorTexture.error = ErrorCode.None;
+            }
+
+            return mirrorTexture;
         }
 
         #region Native bindings
@@ -770,6 +738,8 @@ namespace Fove.Unity
             public static extern IntPtr GetSubmitFunctionPtr();
             [DllImport("FoveUnityFuncs", EntryPoint = "getWfrpFunctionPtr")]
             public static extern IntPtr GetWfrpFunctionPtr();
+            [DllImport("FoveUnityFuncs", EntryPoint = "getUpdateMirrorTexPtrFunctionPtr")]
+            public static extern IntPtr GetUpdateMirrorTexPtrFunctionPtr();
 
             [DllImport("FoveUnityFuncs")]
             public static extern void SetLogSinkFunction(IntPtr fp);
@@ -803,6 +773,11 @@ namespace Fove.Unity
             [DllImport("FoveUnityFuncs", EntryPoint = "getLastPose")]
             public static extern Pose GetLastPose();
         }
+
+        [DllImport("FoveUnityFuncs", EntryPoint = "getMirrorTexturePtr")]
+        private static extern void GetMirrorTexturePtr(out IntPtr texPtr, out int texWidth, out int texHeight);
+        [DllImport("FoveUnityFuncs", EntryPoint = "initBackend")]
+        private static extern ErrorCode InitBackend(IntPtr tempTexPtr);
 
         #endregion
     }

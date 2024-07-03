@@ -18,63 +18,78 @@ namespace Fove.Unity
         [Serializable]
         public enum PlayerPose
         {
-            Sitting,
+            // The origin of the HMD position is the user neck
+            Standard,
+
+            // The origin of the HMD position is the floor
             Standing,
+        }
+
+        /// <summary>
+        /// Specify zero, one or several target eye(s).
+        /// </summary>
+        [Serializable]
+        public enum EyeTarget
+        {
+            Neither,
+            Left,
+            Right,
+            Both,
         }
 
         /// <summary>
         /// When true, fetch the gaze information from the fove HMD and convert it to world space
         /// </summary>
         [Tooltip("Turns off gaze tracking")]
-        [SerializeField] public bool fetchGaze = true;
+        public bool fetchGaze = true;
 
         /// <summary>
         /// When true, fetch the HMD orientation and push it to the game object transform
         /// </summary>
         [Tooltip("Turns off orientation tracking")]
-        [SerializeField] public bool fetchOrientation = true;
+        public bool fetchOrientation = true;
 
         /// <summary>
         /// When true, fetch the HMD position and push it to the game object transform
         /// </summary>
         [Tooltip("Turns off position tracking (turns on position tracking when on)")]
-        [SerializeField] public bool fetchPosition = true;
+        public bool fetchPosition = true;
 
         /// <summary>
         /// Specify which eye this interface should render to.
         /// </summary>
         [Tooltip("Which eye(s) to render to.\n\nSelecting 'Left' or 'Right' will cause this camera to ONLY render to that eye. 'Both' is default. 'Neither' will prevent this camera from rendering to the HMD.\n\nNOTE: 'Neither' will not prevent the normal camera view from displaying.")]
-        [SerializeField] public Eye eyeTargets = Eye.Both;
+        public EyeTarget eyeTargets = EyeTarget.Both;
 
         /// <summary>
         /// Specify the current user pose (Standing or Siting)
         /// </summary>
         [Tooltip("How to interpret the HMD position:\n\nSitting: (Old default) The HMD is positioned relative to the tracking camera.\n\nStanding: An (system-configurable) offset is added to the 'Sitting' position. This option is more compatible with systems like SteamVR.")]
-        [SerializeField] public PlayerPose poseType = PlayerPose.Standing;
+        public PlayerPose poseType = PlayerPose.Standing;
         
         /// <summary>
         /// Unity layers to cull when rendering the left eye.
         /// </summary>
         [Tooltip("Don't draw any of the selected layers to the left eye.")]
-        [SerializeField] public LayerMask cullMaskLeft;
+        public LayerMask cullMaskLeft;
 
         /// <summary>
         /// Unity layers to cull when rendering the right eye.
         /// </summary>
         [Tooltip("Don't draw any of the selected layers to the right eye.")]
-        [SerializeField] public LayerMask cullMaskRight;
+        public LayerMask cullMaskRight;
 
         /// <summary>
         /// Unity layers to ignore when performing gaze object detection.
         /// </summary>
         [Tooltip("Don't perform gaze object detection for the selected layers.")]
-        [SerializeField] public LayerMask gazeCastCullMask;
+        public LayerMask gazeCastCullMask;
 
         /// <summary>
         /// If true, automatically register (resp. unregister) camera object when this object get enabled (resp. disabled)
         /// </summary>
         [Tooltip("Automatically register the camera object associated to the FoveInterface")]
-        [SerializeField] public bool registerCameraObject = true;
+        public bool registerCameraObject = true;
 
         /// <summary>
         /// If true, disable the compositor timewarp feature for the layer
@@ -100,7 +115,7 @@ namespace Fove.Unity
         /// <summary>
         /// Get the camera used to render this layer to the HMD
         /// </summary>
-        public Camera Camera { get { return _cam; } }
+        public Camera Camera { get { return cam; } }
 
         #region Gazecasting
 
@@ -254,35 +269,54 @@ namespace Fove.Unity
         /// <summary>
         /// Get eye rays describing where in the scene each of the user's eyes is looking.
         /// </remarks>
-        /// <param name="immediate">If true re-query the value to the HMD, otherwise it returns the value cached at the beginning of the frame.</param>
         /// <returns>Eye rays describing the user's gaze in world space.</returns>
-        public Result<Stereo<Ray>> GetGazeRays(bool immediate = false)
+        public Result<Ray> GetGazeRay(Eye eye)
         {
-            if(!immediate || !fetchGaze)
-                return _eyeRays;
-
-            var eyeVectors = FoveManager.GetEyeVectors(true);
-            var eyeOffsets = FoveManager.GetEyeOffsets(true);
-
-            Stereo<Ray> eyeRays;
-            CalculateGazeRays(ref eyeOffsets.value, ref eyeVectors.value, out eyeRays);
-
-            return new Result<Stereo<Ray>>(eyeRays, eyeVectors.HasError ? eyeVectors.error : eyeOffsets.error);
+            return eyeRays[eye];
         }
 
         /// <summary>
-        /// Returns the current eyes convergence point. 
-        /// <para>See the description of the <see cref="GazeConvergenceData"/> for more detail on how to use this information. </para>
-        /// </summary>
-        /// <param name="immediate">If true re-query the value to the HMD, otherwise it returns the value cached at the beginning of the frame.</param>
-        /// <returns>The gaze convergence data in world space.</returns>
-        public Result<GazeConvergenceData> GetGazeConvergence(bool immediate = false)
+        /// Returns eyes gaze ray resulting from the two eye gazes combined together, in the world coordinate space.
+        /// <para>
+        /// To get individual eye rays use <see cref="GetGazeRay(Eye)"/> instead
+        /// </para>
+        /// <para>
+        /// To get the user gaze in the headset coordinate space use the <see cref="FoveManager.GetHmdCombinedGazeRay()"/> instead.
+        /// </para>
+        /// <remarks><see cref="ClientCapabilities.EyeTracking"/> should be registered to use this function.</remarks>
+        /// <returns>
+        /// The combined gaze ray in the world coordinate space, and the call success status: 
+        /// <list type="bullet">
+        /// <item><see cref="ErrorCode.None"/> on success</item>
+        /// <item><see cref="ErrorCode.Connect_NotConnected"/> if not connected to the service</item>
+        /// <item><see cref="ErrorCode.API_NotRegistered"/> if the required capability has not been registered prior to this call</item>
+        /// <item><see cref="ErrorCode.Data_NoUpdate"/> if the capability is registered but no valid data has been returned by the service yet</item>
+        /// <item><see cref="ErrorCode.Data_Unreliable"/> if the returned data is too unreliable to be used</item>
+        /// <item><see cref="ErrorCode.Data_LowAccuracy"/> if the returned data is of low accuracy</item>
+        /// </list>
+        /// </returns>
+        public Result<Ray> GetCombinedGazeRay()
         {
-            if(!immediate || !fetchGaze)
-                return _eyeConverge;
+            return eyeConvergeRay;
+        }
 
-            var localGazeResult = FoveManager.GetHMDGazeConvergence(true);
-            return GetWorldSpaceConvergence(ref localGazeResult);
+        /// <summary>
+        /// Returns the depth of the user gaze in the world coordinate space 
+        /// </summary>
+        /// <remarks><see cref="ClientCapabilities.GazeDepth"/> should be registered to use this function.</remarks>
+        /// <returns>The depth of the user in the world coordinate space, and the call success status: 
+        /// <list type="bullet">
+        /// <item><see cref="ErrorCode.None"/> on success</item>
+        /// <item><see cref="ErrorCode.Connect_NotConnected"/> if not connected to the service</item>
+        /// <item><see cref="ErrorCode.API_NotRegistered"/> if the required capability has not been registered prior to this call</item>
+        /// <item><see cref="ErrorCode.Data_NoUpdate"/> if the capability is registered but no valid data has been returned by the service yet</item>
+        /// <item><see cref="ErrorCode.Data_Unreliable"/> if the returned data is too unreliable to be used</item>
+        /// <item><see cref="ErrorCode.Data_LowAccuracy"/> if the returned data is of low accuracy</item>
+        /// </list>
+        /// </returns>
+        public Result<float> GetCombinedGazeDepth()
+        {
+            return FoveManager.Headset.GetCombinedGazeDepth();
         }
 
         /// <summary>
@@ -297,14 +331,13 @@ namespace Fove.Unity
             var camera = new CameraObject
             {
                 id = Id,
-                pose = pose,
+                pose = previousPose,
                 groupMask = (ObjectGroup)(Camera.cullingMask & ~gazeCastCullMask)
             };
 
-            var error = FoveManager.Headset.RegisterCameraObject(camera);
-            var result = new Result(error);
+            var result = FoveManager.Headset.RegisterCameraObject(camera);
             cameraObjectRegistered = result.Succeeded;
-            lastPosition = transform.position;
+            previousPosition = transform.position;
 
             return result;
         }
@@ -316,7 +349,7 @@ namespace Fove.Unity
         virtual public Result UpdateCameraObject()
         {
             var resultRemove = RemoveCameraObject();
-            if (resultRemove.HasError)
+            if (resultRemove.Failed)
                 return resultRemove;
 
             return RegisterCameraObject();
@@ -327,13 +360,12 @@ namespace Fove.Unity
         /// </summary>
         virtual public Result RemoveCameraObject()
         {
-            var error = ErrorCode.None;
+            if (!cameraObjectRegistered)
+                return new Result();
 
-            if (cameraObjectRegistered)
-                error = FoveManager.Headset.RemoveCameraObject(Id);
-
-            var result = new Result(error);
-            cameraObjectRegistered = result.Succeeded;
+            var result = FoveManager.Headset.RemoveCameraObject(Id);
+            if (result.Succeeded)
+                cameraObjectRegistered = false;
 
             return result;
         }

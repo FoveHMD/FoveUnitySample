@@ -2,25 +2,19 @@
 
 public class FOVE3DCursor : FOVEBehavior
 {
-	public enum LeftOrRight
-	{
-		Left,
-		Right
-	}
-
 	[SerializeField]
-	public LeftOrRight whichEye;
+	public Fove.Eye whichEye;
 
-	// Use this for initialization
-	void Start ()
-    {
-    }
-
-	// Latepdate ensures that the object doesn't lag behind the user's head motion
 	void Update()
-    {
-		var rays = FoveInterface.GetGazeRays().value;
-		var ray = whichEye == LeftOrRight.Left ? rays.left : rays.right;
+	{
+		var result = FoveInterface.GetGazeRay(whichEye);
+		var err = result.error;
+		if (err == Fove.ErrorCode.License_FeatureAccessDenied)
+		{
+			result = FoveInterface.GetCombinedGazeRay();
+		}
+
+		var ray = result.value;
 
 		RaycastHit hit;
 		Physics.Raycast(ray, out hit, Mathf.Infinity);
